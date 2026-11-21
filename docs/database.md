@@ -1,16 +1,16 @@
 | データ名 | 目的 | 主な項目 | 関連データ |
 |---|---|---|---|
-| Store | 店舗・ブース情報を管理する | 店舗ID、店舗名、説明、受付番号prefix、営業状態、待ち時間、待ち人数、待ち時間表示タイプ | MenuItem, Order, MapFacility, SalesEntry |
-| MenuItem | 店舗ごとの商品情報を管理する | 商品ID、店舗ID、商品名、説明、価格、販売状態 | Store, OrderItem |
-| Order | 店舗会計と電子呼び出し番号を管理する | 注文ID、店舗ID、受付番号、合計金額、注文状態 | Store, OrderItem |
+| Store | 店舗・ブース情報を管理する | 店舗ID、店舗名、説明、営業状態、待ち時間、待ち人数、待ち時間表示、出展日、モニター／呼び出し表示 | MenuItem, Order, MapFacility, SalesEntry, User |
+| MenuItem | 店舗ごとの商品情報を管理する | 商品ID、店舗ID、商品名、説明、価格、販売状態、売り切れ | Store, OrderItem |
+| Order | 店舗会計と電子呼び出し番号を管理する | 注文ID、店舗ID、開催日、受付番号、合計金額、注文状態 | Store, OrderItem |
 | OrderItem | 注文された商品の明細を管理する | 注文明細ID、注文ID、商品ID、数量、単価 | Order, MenuItem |
 | TicketCounter | 店舗ごとの受付番号採番を管理する | 店舗ID、最終番号 | Store, Order |
-| StoreAccount | 店舗ログイン情報を管理する | アカウントID、店舗ID、ログインID、パスワードハッシュ | Store |
-| WaitStatus | 店舗ごとの待ち時間・待ち人数を管理する | 店舗ID、待ち時間、待ち人数、更新日時 | Store |
-| MapFacility | 校内マップに表示する施設・ブース情報を管理する | 施設ID、名称、種別、階数、x座標、y座標 | Store |
+| User | 店舗・管理者のログイン情報を管理する | ユーザーID、店舗ID（管理者は null）、ログインID、パスワード、role | Store |
+| MapFacility | 校内マップに表示する施設・ブース情報を管理する | 施設ID、名称、種別、階数、x座標、y座標 | Store, EventNotice |
 | SalesEntry | 店舗が当日入力する売上を管理する | 店舗ID、金額、メモ、入力日時 | Store |
-| EventNotice | イベント・お知らせを管理する | タイトル、本文、表示期間、種別 | なし |
-| AdminUser | 管理者ログインと権限を管理する | 管理者ID、ログインID、権限 | Store |
+| EventNotice | イベント・お知らせを管理する | タイトル、本文、表示期間、種別、電光掲示板設定、場所 | MapFacility |
+| FestivalSetting | 学園祭全体設定（開催日など）を管理する | key、value | なし |
+| AuditLog | 管理操作・ログインなどの監査ログを管理する | action、操作者、対象、詳細、IP | なし |
 
 #### テーブル名：
 stores
@@ -23,13 +23,19 @@ stores
 - name
 - description
 - ticket_prefix（未使用。互換のため残置。新規発番では使わない）
+- ticket_limit（受付番号の上限。既定 20）
+- disabled_ticket_numbers（使わない番号の配列）
 - is_open
 - is_visible
 - exhibition_day（`day1` / `day2` / `both`。同じ部屋の日替わりブース用）
+- show_on_monitor（校内モニターに出すか）
+- show_on_call_page（来場者の呼び出しページに出すか）
 - current_wait_min
 - current_queue_count
-- wait_display_mode（予定: `minutes` / `text`）
-- wait_display_text（予定: 時間開始型ブース向け表示文言）
+- wait_display_mode（`minutes` / `text`）
+- wait_display_text（時間開始型ブース向け表示文言）
+- crowd_level（店内混雑。`empty` / `moderate` / `crowded`）
+- time_slots（開始時刻ありブース向けの枠。JSON）
 - created_at
 - updated_at
 
@@ -61,6 +67,7 @@ menu_items
 - description
 - price
 - is_available
+- is_sold_out
 - created_at
 - updated_at
 
@@ -83,17 +90,19 @@ store_id → stores.id
 orders
 
 目的：
-店舗会計と電子呼び出し番号を管理する。モバイルオーダー・予約システムは今後なくす方針のため、来場者の事前注文ではなく、店舗側の会計・呼び出し番号発行を主用途にする。
+店舗会計と電子呼び出し番号を管理する。モバイルオーダー・予約は行わず、店舗側の会計・呼び出し番号発行を主用途にする。
 
 主なカラム：
 - id
 - store_id
+- festival_day（会計時点の開催日。`day1` / `day2`）
 - ticket_number
 - total_price
 - status
 - ordered_at
 - called_at
 - served_at
+- settled_at
 - created_at
 - updated_at
 
@@ -160,16 +169,17 @@ menu_item_id → menu_items.id
 店舗、管理者
 
 #### テーブル名：
-store_accounts
+users
 
 目的：
-店舗向け管理画面のログイン情報を管理する
+店舗向け画面と `/admin` のログイン情報を管理する。`role` で店舗ユーザーと管理者を区別する。
 
 主なカラム：
 - id
-- store_id
+- store_id（店舗ユーザーは必須。管理者は null）
 - login_id
-- password_hash
+- password
+- role（`store` / `admin`）
 - created_at
 - updated_at
 
@@ -177,13 +187,13 @@ store_accounts
 id
 
 外部キー：
-store_id → stores.id
+store_id → stores.id（null 可）
 
 初期データの有無：
-あり
+あり（UserSeeder）
 
 読み取り権限：
-管理者
+管理者（自店舗ユーザーは自分の情報のみ）
 
 書き込み権限：
 管理者
@@ -194,7 +204,7 @@ sales_entries
 目的：
 店舗が当日アプリ内で売上を入力し、紙媒体の決済合計と突き合わせるための売上記録を管理する。
 
-主なカラム（予定）：
+主なカラム：
 - id
 - store_id
 - amount
@@ -219,9 +229,9 @@ store_id → stores.id
 event_notices
 
 目的：
-イベント画面に表示するお知らせ・タイムテーブル・運営連絡を管理する。
+イベント画面に表示するお知らせ・タイムテーブル・運営連絡を管理する。ホームの電光掲示板にも利用する。
 
-主なカラム（予定）：
+主なカラム：
 - id
 - title
 - body
@@ -229,11 +239,18 @@ event_notices
 - starts_at
 - ends_at
 - is_published
+- ticker_lead_minutes
+- ticker_after_minutes
+- ticker_started_at
+- map_facility_id（開催場所。map_facilities.id）
 - created_at
 - updated_at
 
 主キー：
 id
+
+外部キー：
+map_facility_id → map_facilities.id（任意）
 
 読み取り権限：
 来場者、店舗、管理者
@@ -242,18 +259,19 @@ id
 管理者
 
 #### テーブル名：
-admin_users
+audit_logs
 
 目的：
-`/admin` の管理者ログインと権限を管理する。
+管理操作やログインなどの監査ログを残す。
 
-主なカラム（予定）：
+主なカラム：
 - id
-- login_id
-- password_hash
-- role
+- action
+- actor_login_id
+- target_id
+- details（JSON。パスワードは入れない）
+- ip
 - created_at
-- updated_at
 
 主キー：
 id
@@ -262,7 +280,7 @@ id
 管理者
 
 書き込み権限：
-管理者
+システム（API 側で自動記録）
 
 #### テーブル名：
 map_facilities
@@ -272,7 +290,7 @@ map_facilities
 
 主なカラム：
 - id
-- store_id
+- store_id（店舗に紐づかない施設は null 可）
 - name
 - type
 - floor
@@ -285,7 +303,7 @@ map_facilities
 id
 
 外部キー：
-store_id → stores.id
+store_id → stores.id（null 可）
 
 初期データの有無：
 あり

@@ -13,8 +13,8 @@
 - 日時形式: ISO 8601（例: `2026-05-09T12:34:56Z`）
 - 認証:
 	- 来場者向け: なし
-	- 店舗向け: `Authorization: Bearer <JWT>`
-- レート制限: 1000 req/min
+	- 店舗・管理者向け: Laravel Sanctum の `Authorization: Bearer <token>`
+- レート制限: 1000 req/min（ログインは `throttle:login`）
 - バージョニング方式: URLパス `/v1/`
 - 文字コード: UTF-8
 - エラー形式: 共通エラーフォーマットを使用する
@@ -27,17 +27,22 @@
 | /map/facilities | GET | なし | マップ表示データ取得 |
 | /call-numbers | GET | なし | 来場者向け呼び出し番号一覧 |
 | /monitor/call-numbers | GET | なし | 校内モニター向け呼び出し番号一覧 |
+| /festival-day | GET | なし | 学園祭の開催日（day1/day2）取得 |
 | /events | GET | なし | イベント・お知らせ一覧取得 |
 | /events/{id} | GET | なし | イベント・お知らせ詳細取得 |
-| /auth/login | POST | なし | 店舗ログイン |
-| /auth/logout | POST | Bearer Token | 店舗ログアウト |
-| /auth/register | POST | なし | 店舗登録（今後は管理画面へ移行予定） |
-| /store/{id}/wait-time | PATCH | Bearer Token | 待ち時間・待ち人数更新 |
+| /ticker | GET | なし | ホーム電光掲示板用テキスト取得 |
+| /auth/login | POST | なし | 店舗ログイン（互換用。通常は `/booth/auth/login`） |
+| /auth/logout | POST | Bearer Token | 店舗ログアウト（互換用） |
 | /booth/auth/login | POST | なし | 店舗ログイン |
 | /booth/auth/logout | POST | Bearer Token | 店舗ログアウト |
 | /booth/dashboard | GET | Bearer Token | 店舗ダッシュボード取得 |
+| /booth/dashboard/{id} | PATCH | Bearer Token | 店舗情報・営業状態などの更新 |
+| /booth/wait-time | PATCH | Bearer Token | 待ち時間・待ち人数更新 |
 | /booth/accounting/menu-items | GET | Bearer Token | 店舗メニュー取得 |
+| /booth/accounting/menu-items | POST | Bearer Token | 店舗メニュー追加 |
+| /booth/accounting/menu-items/{id} | PATCH | Bearer Token | 店舗メニュー編集 |
 | /booth/accounting/menu-items/{id}/sold-out | PATCH | Bearer Token | 商品の売り切れを切り替える |
+| /booth/accounting/menu-items/{id} | DELETE | Bearer Token | 店舗メニュー削除 |
 | /booth/accounting/orders | GET | Bearer Token | 会計一覧取得 |
 | /booth/accounting/orders | POST | Bearer Token | 会計作成・受付番号発行 |
 | /booth/accounting/orders/{id} | GET | Bearer Token | 会計詳細取得 |
@@ -58,10 +63,22 @@
 | /admin/stores/{id} | GET | Bearer Token | 店舗詳細取得 |
 | /admin/stores/{id} | PATCH | Bearer Token | 店舗編集 |
 | /admin/stores/{id}/wait-time | PATCH | Bearer Token | 管理者による店舗の待ち時間・待ち人数更新 |
+| /admin/stores/{id}/monitor | PATCH | Bearer Token | モニター表示の有無を更新 |
+| /admin/stores/{id}/call-page | PATCH | Bearer Token | 呼び出しページ表示の有無を更新 |
 | /admin/stores/{id} | DELETE | Bearer Token | 店舗削除（非表示化） |
+| /admin/stores/{id}/permanent | DELETE | Bearer Token | 店舗の完全削除 |
 | /admin/revenue | GET | Bearer Token | 総収益取得 |
 | /admin/analytics | GET | Bearer Token | 集計・分析・可視化用データ取得 |
+| /admin/analytics/booth | GET | Bearer Token | ブース向け集計データ取得 |
 | /admin/analytics | DELETE | Bearer Token | 売上データのリセット（会計・売上入力・受付番号を全削除） |
+| /admin/access | GET | Bearer Token | アクセス・操作ログ一覧 |
+| /admin/access/log | GET | Bearer Token | アクセス・操作ログのダウンロード |
+| /admin/festival-day | GET | Bearer Token | 開催日設定の取得 |
+| /admin/festival-day | PATCH | Bearer Token | 開催日設定の更新 |
+| /admin/map/facilities | GET | Bearer Token | マップ施設一覧（管理者） |
+| /admin/map/facilities | POST | Bearer Token | マップ施設作成 |
+| /admin/map/facilities/{id} | PATCH | Bearer Token | マップ施設編集 |
+| /admin/map/facilities/{id} | DELETE | Bearer Token | マップ施設削除 |
 | /admin/events | GET | Bearer Token | イベント・お知らせ一覧（管理者） |
 | /admin/events | POST | Bearer Token | イベント・お知らせ作成 |
 | /admin/events/{id} | GET | Bearer Token | イベント・お知らせ詳細（管理者） |
@@ -82,7 +99,7 @@ GET /api/v1/restaurants
 ```
 
 #### 説明
-来場者向けに、表示対象のブース・店舗一覧を取得する。モバイルオーダーと予約システムは今後なくす方針のため、このAPIはブース一覧・ブース詳細・呼び出し番号導線の基礎データとして扱う。
+来場者向けに、表示対象のブース・店舗一覧を取得する。モバイルオーダー・予約は行わず、ブース一覧・ブース詳細・呼び出し番号導線の基礎データとして扱う。
 
 #### パラメータ
 | 項目 | 型 | 必須 | 説明 |
@@ -135,7 +152,7 @@ GET /api/v1/restaurants/{id}
 #### 説明
 来場者向けに、ブース・店舗の詳細、待ち時間、受付番号情報を取得する。
 
-今後、レスポンスには以下を含める。
+レスポンスには以下を含める。
 - 店舗名
 - 説明
 - メニュー一覧
@@ -187,7 +204,7 @@ GET /api/v1/restaurants/{id}
 
 ### 4.3 店舗ログイン
 ```javascript
-POST /api/v1/store/login
+POST /api/v1/booth/auth/login
 {
   method: 'POST',
   headers: {
@@ -201,7 +218,7 @@ POST /api/v1/store/login
 ```
 
 #### 説明
-店舗IDとパスワードでログインし、JWTを発行する。
+店舗IDとパスワードでログインし、Sanctum トークンを発行する。
 
 #### リクエストボディ
 ```json
@@ -230,7 +247,7 @@ PATCH /api/v1/booth/wait-time
   method: 'PATCH',
   headers: {
     'Content-Type': 'application/json',
-    'Authorization': 'Bearer <JWT_TOKEN>',
+    'Authorization': 'Bearer <TOKEN>',
   },
   body: JSON.stringify({
     current_wait_min: 20,
@@ -280,11 +297,11 @@ PATCH /api/v1/booth/wait-time
 
 #### エラー例
 - 400 Bad Request: `current_wait_min` や `current_queue_count` の値が不正な場合
-- 401 Unauthorized: JWTが無効または期限切れの場合
+- 401 Unauthorized: トークンが無効または期限切れの場合
 - 403 Forbidden: 店舗に紐づかないユーザーが更新しようとした場合
 - 404 Not Found: 認証ユーザーに紐づく店舗が存在しない場合
 
-今後、時間で開始するブース向けに、数値の待ち時間ではなくテキスト表示を返せる項目を追加する。
+時間で開始するブース向けに、数値の待ち時間ではなくテキスト表示も返せる。
 `wait_display_mode` を `text` にし、`wait_display_text` に表示文言を入れる。
 
 ### 4.5 マップ表示データ取得
@@ -360,7 +377,7 @@ GET /api/v1/map/facilities
 #### エラー例
 - 500 Internal Server Error: マップ表示データの取得に失敗した場合
 
-今後、フロント側ではマップフィルタを削除する予定。API は引き続き施設種別や階層を返すが、主用途はフロア画像上のピン描画とブース詳細へのリンクにする。
+フロント側のマップフィルタは削除済み。API は引き続き施設種別や階層を返すが、主用途はフロア切替とピン描画、ブース詳細へのリンクにする。
 
 ### 4.6 店舗ダッシュボード取得
 ```javascript
@@ -512,6 +529,19 @@ GET /api/v1/events/{id}
 - `GET /api/v1/admin/analytics`: 集計・分析・可視化用データ取得
 - `DELETE /api/v1/admin/analytics`: 売上データのリセット（会計・明細・売上入力・受付番号の採番を全削除し、各店舗の待ち人数を 0 に戻す。店舗・メニュー・アカウントは残す。元に戻せない）。レスポンス: `{ "data": { "orders": 削除した会計数, "sales_entries": 削除した売上入力数 } }`
 - `GET|POST|PATCH|DELETE /api/v1/admin/events`: イベント・お知らせ管理
+- `GET|PATCH /api/v1/admin/festival-day`: 開催日設定
+- `GET|POST|PATCH|DELETE /api/v1/admin/map/facilities`: マップ施設管理
+- `GET /api/v1/admin/access` / `GET /api/v1/admin/access/log`: 操作ログ
+
+### 4.12 開催日・電光掲示板
+
+```javascript
+GET /api/v1/festival-day
+GET /api/v1/ticker
+```
+
+- `festival-day`: 学園祭の現在の開催日（`day1` / `day2`）を返す
+- `ticker`: ホーム画面の電光掲示板に流すテキストを返す
 
 ## 5. エラー仕様
 
@@ -543,7 +573,7 @@ GET /api/v1/events/{id}
 - id下3桁を教室番号にしたっていい
 - マップは画像にしてもいい
 - ID指定APIは、存在しないIDの場合に 404 Not Found を返す
-- 店舗向け操作は、JWTの署名検証と認可チェックを必須とする
+- 店舗・管理者向け操作は、Sanctum トークン検証と認可チェックを必須とする
 - 数値項目は、API側で型チェックと範囲チェックを行う
 
 ### 6.1 受付番号（ticket_number）の採番について
